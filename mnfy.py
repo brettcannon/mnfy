@@ -522,9 +522,6 @@ class SourceCode(ast.NodeVisitor):
         self._visit_expr(node.value, ast.Subscript())
         self._visit_and_write('[', node.slice, ']')
 
-    def _Subscript_precendence(self, node):
-        return ast.Subscript()
-
     def visit_arg(self, node):
         self._write(node.arg)
         self._conditional_visit(':', node.annotation)
