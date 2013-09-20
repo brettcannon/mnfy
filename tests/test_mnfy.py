@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import ast
 import inspect
+import math
 import sys
 import unittest
 
@@ -22,11 +23,6 @@ class SourceCodeEmissionTests(unittest.TestCase):
         visitor.visit(given_ast)
         self.assertEqual(str(visitor), expect)
 
-    def test_version(self):
-        # Make sure that the newest AST is supported.
-        self.assertGreaterEqual(int(mnfy.__ast_version__),
-                                int(ast.__version__))
-
     def test_pop(self):
         visitor = mnfy.SourceCode()
         visitor._write('X')
@@ -38,11 +34,31 @@ class SourceCodeEmissionTests(unittest.TestCase):
     def test_Ellipsis(self):
         self.verify(ast.Ellipsis(), '...')
 
-    def test_Num(self):
+    def verify_num(self, given, expect):
+        assert given == eval(expect)
+        self.verify(ast.Num(given), expect)
+
+    def test_Num_integers(self):
         for num in (42, -13, 1.79769313486231e+308, 1.3, 10**12+0.5):
-            self.verify(ast.Num(num), repr(num))
-        for num in (10**12, -10**12):
-            self.verify(ast.Num(num), hex(num))
+            self.verify_num(num, repr(num))
+        for num in (10**12+1, -10**12-1):
+            self.verify_num(num, hex(num))
+
+    def test_Num_floats(self):
+        self.verify_num(1.0, '1.')
+        self.verify_num(10.0, '10.')
+        self.verify_num(100.0, '1e2')
+        self.verify_num(1230.0, '1230.')
+        self.verify_num(123456.0, '123456.')
+        self.verify_num(1234560.0, '1234560.')
+        self.verify_num(12345600.0, '12345600.')
+        self.verify_num(123456000.0, '1.23456e8')
+        self.verify_num(210000.0, '2.1e5')
+        self.verify_num(0.01, '.01')
+        self.verify_num(0.001, '.001')
+        self.verify_num(0.0001, '1e-4')
+        self.verify_num(0.00015, '.00015')
+        self.verify_num(0.000015, '1.5e-5')  # Repr is 1.5e-05
 
     def test_Str(self):
         for text in ('string', '\n', r'\n'):
@@ -265,7 +281,7 @@ class SourceCodeEmissionTests(unittest.TestCase):
 
     def create_arguments(self, args=[], vararg=None, varargannotation=None,
             kwonlyargs=[], kwarg=None, kwargannotation=None, defaults=[],
-            kw_defaults=[]):
+            kw_defaults=[None]):
         args = [ast.arg(x, None) for x in args]
         kwonlyargs = [ast.arg(x, None) for x in kwonlyargs]
         return ast.arguments(args, vararg, varargannotation, kwonlyargs,
@@ -304,8 +320,14 @@ class SourceCodeEmissionTests(unittest.TestCase):
         self.verify(self.create_arguments(kwarg='spam'), '**spam')
         self.verify(self.create_arguments(args=['spam'], vararg='eggs'),
                     'spam,*eggs')
+        self.verify(self.create_arguments(args=['spam'], vararg='eggs',
+                                          kwonlyargs=['bacon']),
+                    'spam,*eggs,bacon')
         self.verify(self.create_arguments(args=['spam'], kwarg='eggs'),
                     'spam,**eggs')
+        self.verify(self.create_arguments(kwonlyargs=['spam', 'eggs', 'bacon'],
+                                          kw_defaults=[None, ast.Num(42), None]),
+                    '*,spam,eggs=42,bacon')
 
     def test_Lambda(self):
         self.verify(ast.Lambda(self.create_arguments(), ast.Num(42)),
@@ -340,6 +362,9 @@ class SourceCodeEmissionTests(unittest.TestCase):
         self.verify(ast.Yield(ast.Num(42)), 'yield 42')
         self.verify(ast.Yield(ast.Tuple([ast.Num(1), ast.Num(2)], ast.Load())),
                     'yield 1,2')
+
+    def test_YieldFrom(self):
+        self.verify(ast.YieldFrom(ast.Num(42)), 'yield from 42')
 
     def test_Import(self):
         self.verify(ast.Import([ast.alias('spam', None)]), 'import spam')
@@ -426,16 +451,26 @@ class SourceCodeEmissionTests(unittest.TestCase):
         self.verify(while_, 'while True:pass\nelse:pass')
 
     def test_With(self):
-        with_ = ast.With(ast.Name('X', ast.Load()), [], [ast.Pass()])
-        self.verify(with_, 'with X:pass')
-        with_.optional_vars = ast.Name('Y', ast.Store())
-        self.verify(with_, 'with X as Y:pass')
-        nested_with = ast.With(ast.Name('X', ast.Load()),
-                                ast.Name('x', ast.Store()),
-                                [ast.With(ast.Name('Y', ast.Load()),
-                                    ast.Name('y', ast.Store()),
-                                    [ast.Pass()])])
-        self.verify(nested_with, 'with X as x,Y as y:pass')
+        # with A: pass
+        A = ast.Name('A', ast.Load())
+        A_clause = ast.withitem(A, None)
+        with_A = ast.With([A_clause], [ast.Pass()])
+        self.verify(with_A, 'with A:pass')
+        # with A as a: pass
+        a = ast.Name('a', ast.Store())
+        a_clause = ast.withitem(A, a)
+        with_a = ast.With([a_clause], [ast.Pass()])
+        self.verify(with_a, 'with A as a:pass')
+        # with A as A, B: pass
+        B = ast.Name('B', ast.Load())
+        B_clause = ast.withitem(B, None)
+        with_B = ast.With([a_clause, B_clause], [ast.Pass()])
+        self.verify(with_B, 'with A as a,B:pass')
+        # with A as A, B as b: pass
+        b = ast.Name('b', ast.Store())
+        b_clause = ast.withitem(B, b)
+        with_b = ast.With([a_clause, b_clause], [ast.Pass()])
+        self.verify(with_b, 'with A as a,B as b:pass')
 
     def test_ExceptHandler(self):
         except_ = ast.ExceptHandler(None, None, [ast.Pass()])
@@ -445,25 +480,35 @@ class SourceCodeEmissionTests(unittest.TestCase):
         except_.name = ast.Name('exc', ast.Store())
         self.verify(except_, 'except Exception as exc:pass')
 
-    def test_TryExcept(self):
+    def test_Try(self):
+        # except
         exc_clause = ast.ExceptHandler(ast.Name('X', ast.Load()), None,
                                         [ast.Pass()])
         exc_clause_2 = ast.ExceptHandler(None, None, [ast.Pass()])
-        try_ = ast.TryExcept([ast.Pass()], [exc_clause, exc_clause_2], None)
-        self.verify(try_, 'try:pass\nexcept X:pass\nexcept:pass')
-        try_.orelse = [ast.Pass()]
-        self.verify(try_, 'try:pass\nexcept X:pass\nexcept:pass\nelse:pass')
-
-    def test_TryFinally(self):
-        try_finally = ast.TryFinally([ast.Pass()], [ast.Pass()])
-        self.verify(try_finally, 'try:pass\nfinally:pass')
+        try_except = ast.Try([ast.Pass()], [exc_clause, exc_clause_2], None, None)
+        self.verify(try_except, 'try:pass\nexcept X:pass\nexcept:pass')
+        # except/else
+        try_except_else = ast.Try([ast.Pass()], [exc_clause, exc_clause_2],
+                                  [ast.Pass()], None)
+        self.verify(try_except_else,
+                    'try:pass\nexcept X:pass\nexcept:pass\nelse:pass')
+        # except/finally
         exc_clause = ast.ExceptHandler(None, None, [ast.Pass()])
-        try_except = ast.TryExcept([ast.Pass()], [exc_clause], None)
-        try_finally.body = [try_except]
-        self.verify(try_finally, 'try:pass\nexcept:pass\nfinally:pass')
-        try_finally.body = [try_except, ast.Raise(None, None)]
-        expect = 'try:\n try:pass\n except:pass\n raise\nfinally:pass'
-        self.verify(try_finally, expect)
+        try_except_finally = ast.Try([ast.Pass()], [exc_clause_2], None,
+                                     [ast.Pass()])
+        self.verify(try_except_finally, 'try:pass\nexcept:pass\nfinally:pass')
+        # except/else/finally
+        try_except_else_finally = ast.Try([ast.Pass()], [exc_clause_2],
+                                          [ast.Pass()], [ast.Pass()])
+        self.verify(try_except_else_finally,
+                    'try:pass\nexcept:pass\nelse:pass\nfinally:pass')
+        # else/finally
+        try_else_finally = ast.Try([ast.Pass()], None, [ast.Pass()],
+                                   [ast.Pass()])
+        self.verify(try_else_finally, 'try:pass\nelse:pass\nfinally:pass')
+        # finally
+        try_finally = ast.Try([ast.Pass()], None, None, [ast.Pass()])
+        self.verify(try_finally, 'try:pass\nfinally:pass')
 
     def test_AugAssign(self):
         for cls, op in self.operators.items():
@@ -577,6 +622,23 @@ class SourceCodeEmissionTests(unittest.TestCase):
         self.verify(funky_if,
                     'if 42:\n break;continue\n if 6:pass\n break;continue')
 
+    def test_Interactive(self):
+        self.verify(ast.Interactive([ast.Pass()]), 'pass')
+
+    def test_Suite(self):
+        self.verify(ast.Suite([ast.Pass()]), 'pass')
+
+    def test_Expression(self):
+        self.verify(ast.Expression(ast.Num(42)), '42')
+
+    def test_coverage(self):
+        # Make sure no expr and up node types are unimplemented.
+        for type_name in dir(ast):
+            type_ = getattr(ast, type_name)
+            if hasattr(type_, '_fields') and len(type_._fields) > 0:
+                if not hasattr(mnfy.SourceCode, 'visit_{}'.format(type_name)):
+                    self.fail('{} lacks a visitor method'.format(type_name))
+
     @staticmethod
     def format_ast_compare_failure(reason, minified, original): #pragma:no cover
         min_details = ast.dump(minified)
@@ -634,6 +696,19 @@ class SourceCodeEmissionTests(unittest.TestCase):
         return minified_source
 
 
+class TransformTest(unittest.TestCase):
+
+    """Base class for assisting in testing AST transformations."""
+
+    def check_transform(self, input_, expect):
+        result = self.transform.visit(input_)
+        if expect is None:
+            if result is not None:
+                self.fail('{} is not None'.formatast.dump(result, False))
+        else:
+            self.assertEqual(ast.dump(result, False), ast.dump(expect, False))
+
+
 class CombineImportsTests(unittest.TestCase):
 
     def setUp(self):
@@ -656,8 +731,7 @@ class CombineImportsTests(unittest.TestCase):
         new_ast = self.transform.visit(module)
         self.assertEqual(len(new_ast.body), 1)
         new_imp = new_ast.body[0]
-        # TODO(Python 3.2) self.assertIsInstance(new_imp, ast.Import)
-        self.assertTrue(isinstance(new_imp, ast.Import))
+        self.assertIsInstance(new_imp, ast.Import)
         self.assertEqual(len(new_imp.names), 2)
         for index, (name, alias) in enumerate(to_import):
             self.assertEqual(new_imp.names[index].name, name)
@@ -673,8 +747,7 @@ class CombineImportsTests(unittest.TestCase):
         self.assertEqual(len(new_ast.body), 3)
         for given, expect in zip(new_ast.body,
                 (ast.Import, ast.ImportFrom, ast.Import)):
-            # TODO(Python 3.2) assertIsInstance
-            self.assertTrue(isinstance(given, expect))
+            self.assertIsInstance(given, expect)
         last_imp = new_ast.body[2]
         self.assertEqual(len(last_imp.names), 1)
         self.assertEqual(last_imp.names[0].name, 'Y')
@@ -716,10 +789,49 @@ class CombineImportsTests(unittest.TestCase):
         self.assertEqual(len(module.body), 5)
 
 
-class UnusedConstantEliminationTests(unittest.TestCase):
+class CombineWithStatementsTests(unittest.TestCase):
+
+    """with A:
+         with B:
+            pass
+
+       with A,B:pass
+    """
+
+    A = ast.Name('A', ast.Load())
+    A_clause = ast.withitem(A, None)
+    B = ast.Name('B', ast.Load())
+    B_clause = ast.withitem(B, None)
+    C = ast.Name('C', ast.Load())
+    C_clause = ast.withitem(C, None)
+
+    def setUp(self):
+        self.transform = mnfy.CombineWithStatements()
+
+    def test_deeply_nested(self):
+        with_C = ast.With([self.C_clause], [ast.Pass()])
+        with_B = ast.With([self.B_clause], [with_C])
+        with_A = ast.With([self.A_clause], [with_B])
+        new_ast = self.transform.visit(with_A)
+        expect = ast.With([self.A_clause, self.B_clause, self.C_clause],
+                          [ast.Pass()])
+        self.assertEqual(ast.dump(new_ast), ast.dump(expect))
+
+    def test_no_optimization(self):
+        with_B = ast.With([self.B_clause], [ast.Pass()])
+        with_A = ast.With([self.A_clause], [with_B, ast.Pass()])
+        new_ast = self.transform.visit(with_A)
+        self.assertEqual(new_ast, with_A)
+
+
+class UnusedConstantEliminationTests(TransformTest):
 
     def setUp(self):
         self.transform = mnfy.EliminateUnusedConstants()
+
+    def test_do_no_over_step_bounds(self):
+        assign = ast.Assign([ast.Name('a', ast.Store())], ast.Num(42))
+        self.check_transform(assign, assign)
 
     def test_unused_constants(self):
         number = ast.Num(1)
@@ -737,8 +849,7 @@ class UnusedConstantEliminationTests(unittest.TestCase):
         self.assertEqual(len(new_ast.body), 1)
         block = new_ast.body[0].body
         self.assertEqual(len(block), 1)
-        # TODO(Python 3.2) assertIsInstance
-        self.assertTrue(isinstance(block[0], ast.Pass))
+        self.assertIsInstance(block[0], ast.Pass)
         return new_ast
 
     def test_empty_FunctionDef(self):
@@ -752,37 +863,74 @@ class UnusedConstantEliminationTests(unittest.TestCase):
     def test_empty_For(self):
         for_ = ast.For(ast.Name('X', ast.Store()), ast.Str('a'), [], [])
         self._test_empty_body(for_)
+        # An empty 'else' clause should just go away
+        for_else = ast.For(ast.Name('X', ast.Store()), ast.Str('a'),
+                           [ast.Pass()], [ast.Pass()])
+        expect = ast.For(ast.Name('X', ast.Store()), ast.Str('a'),
+                           [ast.Pass()], [])
+        self.check_transform(for_else, expect)
 
     def test_empty_While(self):
         while_ = ast.While(ast.Num(42), [], [])
         self._test_empty_body(while_)
+        # An empty 'else' clause should be eliminated.
+        while_else = ast.While(ast.Num(42), [ast.Pass()],
+                               [ast.Pass()])
+        expect = ast.While(ast.Num(42), [ast.Pass()], [])
+        self.check_transform(while_else, expect)
 
     def test_empty_If(self):
         if_ = ast.If(ast.Num(2), [], [])
         self._test_empty_body(if_)
+        # An empty 'else' clause should be eliminated.
+        if_else = ast.If(ast.Num(42), [ast.Pass()], [ast.Pass()])
+        expect = ast.If(ast.Num(42), [ast.Pass()], [])
+        self.check_transform(if_else, expect)
 
     def test_empty_With(self):
-        with_ = ast.With(ast.Name('X', ast.Load()), None, [])
+        with_ = ast.With([ast.Name('X', ast.Load())], [])
         self._test_empty_body(with_)
 
-    # Also tests ExceptHandler
-    def test_empty_TryExcept(self):
+    def test_empty_Try(self):
+        # try/except
         exc_clause = ast.ExceptHandler(None, None,
                                         [ast.Expr(ast.Str('dead code'))])
-        try_exc = ast.TryExcept([], [exc_clause], [])
-        new_ast = self._test_empty_body(try_exc)
-        clause = new_ast.body[0].handlers[0]
-        self.assertEqual(len(clause.body), 1)
-        # TODO(Python 3.2) assertIsInstance
-        self.assertTrue(isinstance(clause.body[0], ast.Pass))
+        try_exc = ast.Try([ast.Pass()], [exc_clause], [], [])
+        expect = ast.Try([ast.Pass()],
+                         [ast.ExceptHandler(None, None, [ast.Pass()])], [], [])
+        self.check_transform(try_exc, expect)
+        # try/finally should be eliminated
+        try_finally = ast.Try([ast.Pass()], [], [],
+                              [ast.Expr(ast.Str('dead code'))])
+        self.check_transform(try_finally, None)
+        # try/else should be eliminated
+        try_else = ast.Try([ast.Pass()], [], [ast.Expr(ast.Str('dead_code'))],
+                           [])
+        self.check_transform(try_else, None)
 
-    def test_empty_TryFinally(self):
-        try_finally = ast.TryFinally([], [ast.Expr(ast.Str('dead code'))])
-        new_ast = self._test_empty_body(try_finally)
-        try_ = new_ast.body[0]
-        self.assertEqual(len(try_.finalbody), 1)
-        # TODO(Python 3.2) assertIsInstance
-        self.assertTrue(isinstance(try_.finalbody[0], ast.Pass))
+
+class IntegerToPowerTests(TransformTest):
+
+    """100000 -> 10**5"""
+
+    def setUp(self):
+        self.transform = mnfy.IntegerToPower()
+
+    def verify(self, base, exponent):
+        num = base**exponent
+        node = ast.Num(num)
+        expect = ast.BinOp(ast.Num(base), ast.Pow(), ast.Num(exponent))
+        self.check_transform(node, expect)
+
+    def test_conversion(self):
+        for num in (5, 12):
+            self.verify(10, num)
+        for num in (17, 20, 40):
+            self.verify(2, num)
+
+    def test_left_alone(self):
+        for num in (10**5+1, float(10**5)):
+            self.check_transform(ast.Num(num), ast.Num(num))
 
 
 class FunctionToLambdaTests(unittest.TestCase):
@@ -794,8 +942,7 @@ class FunctionToLambdaTests(unittest.TestCase):
         fxn_ast = ast.parse(fxn_code)
         new_ast = self.transform.visit(fxn_ast)
         new_fxn = new_ast.body[0]
-        # TODO(Python 3.2) assertIsInstance
-        self.assertTrue(isinstance(new_fxn, ast.FunctionDef),
+        self.assertIsInstance(new_fxn, ast.FunctionDef,
             '{} not an instance of ast.FunctionDef'.format(new_ast.__class__))
 
     def test_decorator_fail(self):
@@ -824,18 +971,14 @@ class FunctionToLambdaTests(unittest.TestCase):
         fxn = module.body[0]
         new_ast = self.transform.visit(module)
         assign = new_ast.body[0]
-        # TODO(Python 3.2) assertIsInstance
-        self.assertTrue(isinstance(assign, ast.Assign))
+        self.assertIsInstance(assign, ast.Assign)
         self.assertEqual(len(assign.targets), 1)
         target = assign.targets[0]
-        # TODO(Python 3.2) assertIsInstance
-        self.assertTrue(isinstance(target, ast.Name))
+        self.assertIsInstance(target, ast.Name)
         self.assertEqual(target.id, 'identity')
-        # TODO(Python 3.2) assertIsInstance
-        self.assertTrue(isinstance(target.ctx, ast.Store))
+        self.assertIsInstance(target.ctx, ast.Store)
         lmda = assign.value
-        # TODO(Python 3.2) assertIsInstance
-        self.assertTrue(isinstance(lmda, ast.Lambda))
+        self.assertIsInstance(lmda, ast.Lambda)
         self.assertIs(lmda.args, fxn.args)
         self.assertIs(lmda.body, fxn.body[0].value)
 
@@ -844,16 +987,14 @@ class FunctionToLambdaTests(unittest.TestCase):
         module = ast.parse('def fxn(): return')
         new_ast = self.transform.visit(module)
         lambda_ = new_ast.body[0].value
-        # TODO(Python 3.2) assertIsInstance
-        self.assertTrue(isinstance(lambda_.body, ast.Name))
+        self.assertIsInstance(lambda_.body, ast.Name)
         self.assertEqual(lambda_.body.id, 'None')
-        # TODO(Python 3.2) assertIsInstance
-        self.assertTrue(isinstance(lambda_.body.ctx, ast.Load))
+        self.assertIsInstance(lambda_.body.ctx, ast.Load)
 
     unittest.skip('not implemented')
     def test_empty_return(self):
         pass
 
 
-if __name__ == '__main__':  # pragma: no cover
-    unittest.main(__name__)
+if __name__ == '__main__':
+    unittest.main()

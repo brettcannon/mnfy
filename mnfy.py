@@ -1,11 +1,14 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.3
 """Minify Python source code."""
 import ast
 import contextlib
 import functools
+import math
+import sys
 
 
-__ast_version__ = '82163'  # AST version compatibility
+if sys.version_info[:2] != (3, 3): # pragma: no cover
+    raise ImportError('mnfy only supports Python 3.3')
 
 
 _simple_nodes = {
@@ -81,16 +84,7 @@ class SourceCode(ast.NodeVisitor):
 
     """
 
-    # Node types that purposefully lack a visitor method:
-    #  Interactive
-    #  Expression
-    #  Suite (probably required to work with Jython's AST)
-    #  Load
-    #  Store
-    #  Del
-    #  AugLoad
-    #  AugStore
-    #  Param
+    # Some node types which are lacking any fields are purposefully skipped.
 
     def __init__(self):
         super().__init__()
@@ -221,18 +215,84 @@ class SourceCode(ast.NodeVisitor):
     def visit_Module(self, node):
         self._visit_body(node.body, indent=False)
 
+    def visit_Interactive(self, node):
+        self._visit_body(node.body, indent=False)
+
+    def visit_Suite(self, node):
+        self._visit_body(node.body, indent=False)
+
+    def visit_Expression(self, node):
+        self._visit_expr(node.body, None)
+
     def _Num_precedence(self, node):
         if node.n < 0:  # For Pow's left operator
             return ast.USub()
         else:
             return node
 
+    def _write_int(self, num):
+        if abs(num) >= 10**12:
+            num_str = hex(num)
+        else:
+            num_str = str(num)
+        self._write(num_str)
+
+    def _write_float(self, num):
+        # Work with the string representation to avoid floating point quirks.
+        num_str = str(num)
+        # Scientific notation with a positive mantissa where appropriate,
+        # else strip the trailing zero.
+        if num_str.endswith('.0'):
+            as_int = num_str[:-2]
+            num_str = num_str[:-1]
+            if as_int != '0' and as_int.endswith('0'):
+                mantissa = 1  # Known by endswith() check in the 'if' guard
+                while as_int[-mantissa-1] == '0':
+                    mantissa += 1
+                coefficient_digits = as_int[:-mantissa]
+                if len(coefficient_digits) == 1:
+                    coefficient = coefficient_digits
+                else:
+                    coefficient = '{}.{}'.format(coefficient_digits[0],
+                                                 coefficient_digits[1:])
+                    mantissa += len(coefficient_digits[1:])
+                sci_notation = '{}e{}'.format(coefficient, mantissa)
+                if len(sci_notation) < len(num_str):
+                    num_str = sci_notation
+        # Scientific notation with a negative mantissa where appropriate, else
+        # strip the leading zero.
+        elif num_str.startswith('0.'):
+            num_str = num_str[1:]
+            if num_str.startswith('.00'):
+                mantissa = -3
+                while num_str[-mantissa] == '0':
+                    mantissa -= 1
+                coefficient_digits = num_str[-mantissa:]
+                if len(coefficient_digits) == 1:
+                    coefficient = coefficient_digits
+                else:
+                    coefficient = '{}.{}'.format(coefficient_digits[0],
+                                                 coefficient_digits[1:])
+                sci_notation = '{}e{}'.format(coefficient, mantissa)
+                if len(sci_notation) < len(num_str):
+                    num_str = sci_notation
+        # Scientific notation from Python with a single digit, negative mantissa
+        # has an unneeded leading zero.
+        elif 'e' in num_str:
+            coefficient, _, mantissa = num_str.partition('e')
+            if mantissa[:2] == '-0':
+                mantissa = mantissa[2:]
+                num_str = '{}e-{}'.format(coefficient, mantissa)
+        self._write(num_str)
+
     def visit_Num(self, node):
         num = node.n
-        if isinstance(num, int) and abs(num) >= 10**12:
-            self._write(hex(num))
+        if isinstance(num, int):
+            self._write_int(num)
+        elif isinstance(num, float):
+            self._write_float(num)
         else:
-            self._write(repr(num))
+            self._write(str(num))
 
     def visit_Str(self, node):
         self._write(repr(node.s))
@@ -442,7 +502,6 @@ class SourceCode(ast.NodeVisitor):
                 self._visit_and_write('**', node.kwargs)
             self._write(')')
 
-    # XXX precedence
     def visit_IfExp(self, node):
         self._visit_and_write(node.body, ' if ', node.test, ' else ',
                 node.orelse)
@@ -456,7 +515,9 @@ class SourceCode(ast.NodeVisitor):
     def visit_ExtSlice(self, node):
         self._seq_visit(node.dims, ',')
 
-    # XXX precedence
+    def visit_Index(self, node):
+        self.visit(node.value)
+
     def visit_Subscript(self, node):
         self._visit_and_write(node.value, '[', node.slice, ']')
 
@@ -473,7 +534,11 @@ class SourceCode(ast.NodeVisitor):
         if non_defaults and defaults:
             self._write(',')
         for arg, default in args_with_defaults:
-            self._visit_and_write(arg, '=', default, ',')
+            # Thanks to len(kw_defaults) == len(kwonlyargs)
+            if default is not None:
+                self._visit_and_write(arg, '=', default, ',')
+            else:
+                self._visit_and_write(arg, ',')
         if defaults:
             self._pop(',')
 
@@ -540,6 +605,10 @@ class SourceCode(ast.NodeVisitor):
                 self.visit_Tuple(node.value, parens=False)
             else:
                 self.visit(node.value)
+
+    def visit_YieldFrom(self, node):
+        # Python 3.3.0 claims 'value' is optional, but grammar prevents that.
+        self._visit_and_write('yield from ', node.value)
 
     def _global_nonlocal_visit(self, node):
         """
@@ -648,24 +717,22 @@ class SourceCode(ast.NodeVisitor):
             self._write('else:')
             self._visit_body(node.orelse)
 
-    def visit_With(self, node, *, nested=False):
+    def visit_withitem(self, node):
+        self.visit(node.context_expr)
+        self._conditional_visit(' as ', node.optional_vars)
+
+    def visit_With(self, node):
         """
-        with X: pass
-        with X:pass
+        with X as x: pass
+
+        with X as x:pass
 
         """
-        if not nested:
-            self._indent()
-            self._visit_and_write('with ', node.context_expr)
-        else:
-            self.visit(node.context_expr)
-        self._conditional_visit(' as ', node.optional_vars)
-        if len(node.body) == 1 and isinstance(node.body[0], ast.With):
-            self._write(',')
-            self.visit_With(node.body[0], nested=True)
-        else:
-            self._write(':')
-            self._visit_body(node.body)
+        self._indent()
+        self._write('with ')
+        self._seq_visit(node.items, ',')
+        self._write(':')
+        self._visit_body(node.body)
 
     def visit_ExceptHandler(self, node):
         """
@@ -680,27 +747,20 @@ class SourceCode(ast.NodeVisitor):
         self._write(':')
         self._visit_body(node.body)
 
-    def visit_TryExcept(self, node):
+    def visit_Try(self, node):
         self._indent()
         self._write('try:')
         self._visit_body(node.body)
-        self._seq_visit(node.handlers)
+        if node.handlers:
+            self._seq_visit(node.handlers)
         if node.orelse:
             self._indent()
             self._write('else:')
             self._visit_body(node.orelse)
-
-    def visit_TryFinally(self, node):
-        # try/except/finally is done as a TryFinally containing a TryExcept.
-        if len(node.body) == 1 and isinstance(node.body[0], ast.TryExcept):
-            self.visit_TryExcept(node.body[0])
-        else:
+        if node.finalbody:
             self._indent()
-            self._write('try:')
-            self._visit_body(node.body)
-        self._indent()
-        self._write('finally:')
-        self._visit_body(node.finalbody)
+            self._write('finally:')
+            self._visit_body(node.finalbody)
 
     def visit_FunctionDef(self, node):
         """
@@ -813,6 +873,28 @@ class CombineImports(ast.NodeTransformer):
         return None
 
 
+class CombineWithStatements(ast.NodeTransformer):
+
+    """Nest 'with' statements.
+
+    with A:
+        with B:
+            pass
+
+    with A,B:
+        pass  # savings: 4 per additional statement
+
+    """
+
+    def visit_With(self, node):
+        self.generic_visit(node)
+        if len(node.body) == 1 and isinstance(node.body[0], ast.With):
+            child_with = node.body[0]
+            node.items.extend(child_with.items)
+            node.body = child_with.body
+        return node
+
+
 class EliminateUnusedConstants(ast.NodeTransformer):
 
     """Remove any side-effect-free constant used as a statement.
@@ -831,11 +913,16 @@ class EliminateUnusedConstants(ast.NodeTransformer):
         """Return None if the Expr contains a side-effect-free constant."""
         return None if isinstance(node.value, self.constants) else node
 
+    def visit_Pass(self, node):
+        """The 'pass' statement is the epitome of an unused constant."""
+        return None
+
     def _visit_body(self, node):
         """Generically guarantee at least *some* statement exists in a block
-        body to stay syntactically correct."""
+        body to stay syntactically correct while allowing side-effects outside
+        the body to continue to exist (e.g. the guard of an 'if' statement)."""
         node = self.generic_visit(node)
-        if not node.body:
+        if len(node.body) == 0:
             node.body.append(ast.Pass())
         return node
 
@@ -845,17 +932,51 @@ class EliminateUnusedConstants(ast.NodeTransformer):
     visit_While = _visit_body
     visit_If = _visit_body
     visit_With = _visit_body
-    visit_TryExcept = _visit_body
     visit_ExceptHandler = _visit_body
 
-    def visit_TryFinally(self, node):
-        node = self._visit_body(node)
-        if not node.finalbody:
-            node.finalbody.append(ast.Pass())
+    def visit_Try(self, node):
+        """Keep 'except' clauses as they suppress exceptions, but remove any
+        other clauses that end up being empty."""
+        if len(node.handlers) > 0:
+            node = self._visit_body(node)
+        else:
+            node = self.generic_visit(node)
+        if len(node.orelse) == 1 and isinstance(node.orelse[0], ast.Pass):
+            node.orelse[:] = []
+        if len(node.finalbody) == 1 and isinstance(node.finalbody[0], ast.Pass):
+            node.finalbody[:] = []
+        # _visit_body() guarantees this won't over-step its bounds and eliminate
+        # a statement that has an 'except' clause.
+        if all(len(getattr(node, x)) == 0 for x in ast.Try._fields):
+            return None
         return node
 
 
-safe_transforms = [CombineImports, EliminateUnusedConstants]
+class IntegerToPower(ast.NodeTransformer):
+
+    """Transform integers of a large enough size to a power of 2 or 10.
+
+    10**5 -> 10000
+    """
+
+    def visit_Num(self, node):
+        num = node.n
+        if not isinstance(num, int):
+            return node
+        if num >= 10**5 and not math.log10(num) % 1:
+            power_10 = int(math.log10(num))
+            return ast.BinOp(ast.Num(10), ast.Pow(), ast.Num(power_10))
+        elif num >= 2**17 and not math.log2(num) % 1:
+            power_2 = int(math.log2(num))
+            return ast.BinOp(ast.Num(2), ast.Pow(), ast.Num(power_2))
+        else:
+            return node
+
+
+safe_transforms = [CombineImports,
+                   CombineWithStatements,
+                   EliminateUnusedConstants,
+                   IntegerToPower]
 
 
 class FunctionToLambda(ast.NodeTransformer):
@@ -906,12 +1027,9 @@ if __name__ == '__main__':  # pragma: no cover
     arg_parser.add_argument('filename',
                             help='path to Python source file')
     arg_parser.add_argument('--safe-transforms', action='store_true',
-                            default=True,
+                            default=False,
                             help='Perform safe transformations on the AST; '
                                  "equivalent of Python's `-OO` (default)")
-    arg_parser.add_argument('--no-transforms', dest='safe_transforms',
-                            action='store_false',
-                            help='Perform no AST transformations')
     arg_parser.add_argument('--function-to-lambda', action='append_const',
                             dest='unsafe_transforms', const=FunctionToLambda,
                             help='Transform functions to lambdas '
