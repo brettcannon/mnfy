@@ -1,0 +1,21 @@
+mnfy - Minifier/obfuscator for Python 3
+///////////////////////////////////////
+
+The mnfy project provides a module which attempts to syntactically minimize
+Python source code while continuing to be semantically identical. Optional
+transformations are also provided which semantically transform the code in
+various ways that lead to less source code. The levels of transformation are:
+
+    * no transforms
+        Purely syntactic minification (e.g., removing unneeded whitespace); the
+        original AST representation of code does not change pre- or post-change
+    * safe transforms
+        Semantically equivalent, but the AST is allowed to change; equivalent
+        to running Python with ``-OO``
+    * functions to lambda expressions
+        Translates qualifying functions to lambda expressions; unsafe as lambda
+        expressions differ from functions (e.g., lack a ``__name__`` attribute)
+
+To use mnfy from the command-line, use Python's ``-m`` flag::
+
+    python3 -m mnfy -h
