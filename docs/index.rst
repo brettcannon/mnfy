@@ -7,7 +7,7 @@ Web Pages
 ---------
 
 * `Documentation <http://mnfy.rtfd.org>`__
-* `Project site <http://mnfy.googlecode.com>`__ (`issue tracker`_)
+* `Project site <https://github.com/brettcannon/mnfy>`__ (`issue tracker`_)
 * `PyPI/Cheeseshop <http://pypi.python.org/pypi/mnfy>`__
 
 What the heck is mnfy for?
@@ -191,7 +191,7 @@ to::
   2**32
 
 
-Sane transformations 
+Sane transformations
 ------------------------------------------------
 
 For typical code, sane transformations should be fine (e.g. you are not
@@ -234,4 +234,4 @@ to::
 .. _PEP 386: http://python.org/dev/peps/pep-0386/
 .. _contextlib.nested(): http://docs.python.org/2.7/library/contextlib.html#contextlib.nested
 .. _math module: http://docs.python.org/3/library/math.html
-.. _issue tracker: https://code.google.com/p/mnfy/issues/list?mode=grid
+.. _issue tracker: https://github.com/brettcannon/mnfy/issues?state=open
