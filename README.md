@@ -1,0 +1,4 @@
+mnfy
+====
+
+Minify Python code
