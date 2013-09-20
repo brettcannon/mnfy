@@ -278,6 +278,18 @@ class SourceCodeEmissionTests(unittest.TestCase):
         # ExtSlice
         sub.slice = ast.ExtSlice([slice1, slice2])
         self.verify(sub, 'X[42,::2]')
+        # Issue #20
+        expect = ast.Expr(
+            value=ast.Subscript(
+                value=ast.BinOp(
+                    left=ast.Name(id='p', ctx=ast.Load()),
+                    op=ast.Add(),
+                    right=ast.List(elts=[ast.Num(n=1), ast.Num(n=2),
+                                         ast.Num(n=3), ast.Num(n=4)],
+                                   ctx=ast.Load())),
+                slice=ast.Slice(lower=None, upper=ast.Num(n=4), step=None),
+                ctx=ast.Load()))
+        self.verify(expect, '(p+[1,2,3,4])[:4]')
 
     def create_arguments(self, args=[], vararg=None, varargannotation=None,
             kwonlyargs=[], kwarg=None, kwargannotation=None, defaults=[],
