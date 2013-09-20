@@ -1024,7 +1024,8 @@ class FunctionToLambda(ast.NodeTransformer):
 if __name__ == '__main__':  # pragma: no cover
     import argparse
 
-    arg_parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    arg_parser = argparse.ArgumentParser(
+            description='Minify Python source code')
     arg_parser.add_argument('filename',
                             help='path to Python source file')
     arg_parser.add_argument('--safe-transforms', action='store_true',
