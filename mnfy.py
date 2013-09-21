@@ -1031,7 +1031,7 @@ if __name__ == '__main__':  # pragma: no cover
     arg_parser.add_argument('--safe-transforms', action='store_true',
                             default=False,
                             help='Perform safe transformations on the AST; '
-                                 'equivalent of Python's `-OO` (default)'')
+                                 "equivalent of Python's `-OO` (default)")
     arg_parser.add_argument('--function-to-lambda', action='append_const',
                             dest='unsafe_transforms', const=FunctionToLambda,
                             help='Transform functions to lambdas '
