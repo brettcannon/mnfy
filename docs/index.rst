@@ -136,7 +136,7 @@ to::
 Combine ``with`` statements
 +++++++++++++++++++++++++++
 
-As of Python 3.2, `contextlib.nested()`_ is essentially syntactically supported.
+As of Python 3.2, `contextlib.nested()`_ is syntactically supported.
 
 From::
 
@@ -180,7 +180,7 @@ Integer constants to power
 
 For sufficiently large integer constants, it saves space to use the power
 operator (``**``). Only numbers of base 2 and 10 are used as that is what
-directly supported by the `math module`_.
+the `math module`_ supports.
 
 From::
 
@@ -220,11 +220,11 @@ lambda functions do not have a ``__name__`` attribute).
 
 From::
 
-  def identity(x):return x
+  def identity(x):return x  # 24 characters
 
 to::
 
-  x=lambda x:x
+  identity=lambda x:x  # 19 characters
 
 .. LINKS
 
