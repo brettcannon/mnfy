@@ -945,10 +945,6 @@ class EliminateUnusedConstants(ast.NodeTransformer):
             node = self._visit_body(node)
         else:
             node = self.generic_visit(node)
-        if len(node.orelse) == 1 and isinstance(node.orelse[0], ast.Pass):
-            node.orelse[:] = []
-        if len(node.finalbody) == 1 and isinstance(node.finalbody[0], ast.Pass):
-            node.finalbody[:] = []
         # _visit_body() guarantees this won't over-step its bounds and eliminate
         # a statement that has an 'except' clause.
         if all(len(getattr(node, x)) == 0 for x in ast.Try._fields):
