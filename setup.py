@@ -1,4 +1,5 @@
 from distutils.core import setup
+import os
 import sys
 
 with open('docs/index.rst') as file:
@@ -10,6 +11,10 @@ long_description += index_text.rpartition('.. LINKS')[2]
 version = '34.0.0'
 assert version.startswith('{}{}'.format(*sys.version_info))
 
+py_modules = ['mnfy']  # Don't install test code since not in a package.
+if os.environ.get('MNFY_RICHARD_JONES'):
+    py_modules.append('nfy')
+
 setup(
     name='mnfy',
     # First digit is the Massive/feature version of Python, rest are
@@ -18,7 +23,7 @@ setup(
     author='Brett Cannon',
     author_email='brett@python.org',
     url='http://mnfy.rtfd.org/',
-    py_modules=['mnfy'],  # Don't install test code since not in a package
+    py_modules=py_modules,
     license='Apache Licence 2.0',
     description='Minify/obfuscate Python 3 source code',
     long_description=long_description,

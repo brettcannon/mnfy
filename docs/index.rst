@@ -74,6 +74,12 @@ See the help message for the project for full instructions on usage::
 
 .. END README
 
+If you happen to define the ``MNFY_RICHARD_JONES`` environment variable then not
+only will ``mnfy`` be installed, but so will ``nfy`` which just calls ``mnfy``
+for you. This is so that you can use ``python -mnfy`` to invoke mnfy (i.e.
+minifying the "mnfy" name). The environment variable name is in honour of
+Richard Jones who first came up with the minifed name idea.
+
 
 Transformations
 ===============
