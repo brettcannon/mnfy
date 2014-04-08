@@ -679,7 +679,7 @@ class SourceCodeEmissionTests(unittest.TestCase):
                     self.fail('{} lacks a visitor method'.format(type_name))
 
     @staticmethod
-    def format_ast_compare_failure(reason, minified, original): #pragma:no cover
+    def format_ast_compare_failure(reason, minified, original): # pragma: no cover
         min_details = ast.dump(minified)
         orig_details = ast.dump(original, include_attributes=True)
         return '{}: {} != {}'.format(reason, min_details, orig_details)
