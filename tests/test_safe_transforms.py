@@ -199,22 +199,28 @@ class UnusedConstantEliminationTests(TransformTest):
         with_ = ast.With([ast.Name('X', ast.Load())], [])
         self._test_empty_body(with_)
 
-    def test_empty_Try(self):
-        # try/except
+    def test_Try(self):
+        # try/except where 'except' is only dead code.
         exc_clause = ast.ExceptHandler(None, None,
                                         [ast.Expr(ast.Str('dead code'))])
         try_exc = ast.Try([ast.Pass()], [exc_clause], [], [])
         expect = ast.Try([ast.Pass()],
                          [ast.ExceptHandler(None, None, [ast.Pass()])], [], [])
         self.check_transform(try_exc, expect)
-        # try/finally should be eliminated
+        # try/finally should be eliminated when 'finally' is empty.
         try_finally = ast.Try([ast.Pass()], [], [],
                               [ast.Expr(ast.Str('dead code'))])
         self.check_transform(try_finally, None)
-        # try/else should be eliminated
+        # try/else should be eliminated when 'else' is empty..
         try_else = ast.Try([ast.Pass()], [], [ast.Expr(ast.Str('dead_code'))],
                            [])
         self.check_transform(try_else, None)
+        # try/except/finally where 'finally' is empty gets that clause dropped.
+        try_exc_finally = ast.Try([ast.Pass()], [exc_clause], [], [ast.Pass()])
+        self.check_transform(try_exc_finally, expect)
+        # try/except/else where 'else' is empty gets that clause dropped.
+        try_exc_else = ast.Try([ast.Pass()], [exc_clause], [ast.Pass()], [])
+        self.check_transform(try_exc_else, expect)
 
 
 class IntegerToPowerTests(TransformTest):
