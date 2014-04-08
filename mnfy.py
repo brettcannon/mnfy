@@ -6,9 +6,9 @@ import functools
 import math
 import sys
 
-
-if sys.version_info[:2] != (3, 3): # pragma: no cover
-    raise ImportError('mnfy only supports Python 3.3')
+_python_version = 3, 4
+if sys.version_info[:2] != _python_version: # pragma: no cover
+    raise ImportError('mnfy only supports Python {}.{}'.format(*_python_version))
 
 
 _simple_nodes = {
@@ -97,7 +97,7 @@ class SourceCode(ast.NodeVisitor):
 
     def _write(self, token):
         """Write a token into the source code buffer."""
-        assert isinstance(token, str)  # Keep calling instead of visit()
+        assert isinstance(token, str), token  # Keep calling instead of visit()
         self._buffer.append(token)
 
     def _peek(self):
@@ -299,6 +299,9 @@ class SourceCode(ast.NodeVisitor):
 
     def visit_Bytes(self, node):
         self._write(repr(node.s))
+
+    def visit_NameConstant(self, node):
+        self._write(repr(node.value))
 
     def visit_Starred(self, node):
         self._visit_and_write('*', node.value)
@@ -557,7 +560,7 @@ class SourceCode(ast.NodeVisitor):
             self._write('*')
             wrote=True
             if node.vararg:
-                self.visit(ast.arg(node.vararg, node.varargannotation))
+                self.visit(node.vararg)
             if node.kwonlyargs:
                 self._write(',')
                 wrote = True
@@ -566,7 +569,7 @@ class SourceCode(ast.NodeVisitor):
             if wrote:
                 self._write(',')
             self._write('**')
-            self.visit(ast.arg(node.kwarg, node.kwargannotation))
+            self.visit(node.kwarg)
 
     def visit_Lambda(self, node):
         """
@@ -1008,7 +1011,8 @@ class FunctionToLambda(ast.NodeTransformer):
             return node
         args = node.args
         # No annotations for *args or **kwargs.
-        if args.varargannotation or args.kwargannotation:
+        if ((args.vararg and args.vararg.annotation) or
+            (args.kwarg and args.kwarg.annotation)):
             return node
         # No annotations on any other parameters.
         if any(arg.annotation for arg in args.args):

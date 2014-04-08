@@ -7,7 +7,7 @@ with open('docs/index.rst') as file:
 long_description = index_text.partition('.. END README')[0]
 long_description += index_text.rpartition('.. LINKS')[2]
 
-version = '33.0.1'
+version = '34.0.0'
 assert version.startswith('{}{}'.format(*sys.version_info))
 
 setup(
@@ -26,6 +26,6 @@ setup(
         'Development Status :: 5 - Production/Stable',
         'Intended Audience :: Developers',
         'License :: OSI Approved :: Apache Software License',
-        'Programming Language :: Python :: 3.3',
+        'Programming Language :: Python :: 3.4',
     ],
 )
