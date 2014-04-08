@@ -60,6 +60,10 @@ class SourceCodeEmissionTests(unittest.TestCase):
         self.verify_num(0.00015, '.00015')
         self.verify_num(0.000015, '1.5e-5')  # Repr is 1.5e-05
 
+    def test_Num_complex(self):
+        self.verify_num(3j, '3j')
+        self.verify_num(complex(3, 4), '(3+4j)')
+
     def test_Str(self):
         for text in ('string', '\n', r'\n'):
             self.verify(ast.Str(text), repr(text))
