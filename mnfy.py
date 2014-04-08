@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.3
+#!/usr/bin/env python3.4
 """Minify Python source code."""
 import ast
 import contextlib
