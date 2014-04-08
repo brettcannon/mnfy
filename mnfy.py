@@ -291,8 +291,10 @@ class SourceCode(ast.NodeVisitor):
             self._write_int(num)
         elif isinstance(num, float):
             self._write_float(num)
-        else:
+        elif isinstance(num, complex):
             self._write(str(num))
+        else:
+            raise TypeError('Num must be in, float, or complex, not {}'.format(num))
 
     def visit_Str(self, node):
         self._write(repr(node.s))
