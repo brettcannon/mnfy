@@ -1,0 +1,6 @@
+[report]
+# Regexes for lines to exclude from consideration
+exclude_lines =
+    pragma: no cover
+    self.fail
+    if __name__ == '__main__':

@@ -1021,7 +1021,7 @@ class FunctionToLambda(ast.NodeTransformer):
         return ast.Assign([ast.Name(node.name, ast.Store())], lambda_)
 
 
-if __name__ == '__main__':  # pragma: no cover
+if __name__ == '__main__':
     import argparse
 
     arg_parser = argparse.ArgumentParser(
