@@ -1044,12 +1044,12 @@ if __name__ == '__main__':
     with open(args.filename, 'rb') as source_file:
         source = source_file.read()
     source_ast = ast.parse(source)
-    if args.safe_transforms:
-        for transform in safe_transforms:
-            transformer = transform()
-            source_ast = transformer.visit(source_ast)
     if args.unsafe_transforms:
         for transform in args.unsafe_transforms:
+            transformer = transform()
+            source_ast = transformer.visit(source_ast)
+    if args.safe_transforms:
+        for transform in safe_transforms:
             transformer = transform()
             source_ast = transformer.visit(source_ast)
     minifier = SourceCode()
