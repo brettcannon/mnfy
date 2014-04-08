@@ -6,6 +6,7 @@ MANIFEST
 coverage
 htmlcov
 dist
+venv
 
 *.py[cod]
 
