@@ -939,19 +939,7 @@ class EliminateUnusedConstants(ast.NodeTransformer):
     visit_If = _visit_body
     visit_With = _visit_body
     visit_ExceptHandler = _visit_body
-
-    def visit_Try(self, node):
-        """Keep 'except' clauses as they suppress exceptions, but remove any
-        other clauses that end up being empty."""
-        if len(node.handlers) > 0:
-            node = self._visit_body(node)
-        else:
-            node = self.generic_visit(node)
-        # _visit_body() guarantees this won't over-step its bounds and eliminate
-        # a statement that has an 'except' clause.
-        if all(len(getattr(node, x)) == 0 for x in ast.Try._fields):
-            return None
-        return node
+    visit_Try = _visit_body
 
 
 class IntegerToPower(ast.NodeTransformer):
@@ -975,10 +963,88 @@ class IntegerToPower(ast.NodeTransformer):
             return node
 
 
-safe_transforms = [CombineImports,
-                   CombineWithStatements,
-                   EliminateUnusedConstants,
-                   IntegerToPower]
+class DropPass(ast.NodeTransformer):
+
+    """Drops any and all 'pass' statements which are not by themselves."""
+
+    def _filter(self, body):
+        if len(body) == 1:
+            return body
+        return [stmt for stmt in body if not isinstance(stmt, ast.Pass)]
+
+    def _can_blank(self, fields, node):
+        for field in fields:
+            stmts = getattr(node, field)
+            if len(stmts) == 1 and isinstance(stmts[0], ast.Pass):
+                setattr(node, field, [])
+        return node
+
+    def _visit_node(self, node_type, stmt_fields, node):
+        node = self.generic_visit(node)
+        new_fields = node.__dict__.copy()
+        for field in stmt_fields:
+            new_fields[field] = self._filter(getattr(node, field))
+        return node_type(**new_fields)
+
+    def _visit_body(self, node_type, node):
+        return self._visit_node(node_type, {'body'}, node)
+
+    def _visit_body_orelse(self, node_type, node):
+        return self._visit_node(node_type, {'body', 'orelse'}, node)
+
+    def visit_Module(self, node):
+        return self._visit_body(ast.Module, node)
+
+    def visit_Interactive(self, node):
+        return self._visit_body(ast.Interactive, node)
+
+    def visit_Suite(self, node):
+        return self._visit_body(ast.Suite, node)
+
+    def visit_FunctionDef(self, node):
+        return self._visit_body(ast.FunctionDef, node)
+
+    def visit_ClassDef(self, node):
+        return self._visit_body(ast.ClassDef, node)
+
+    def visit_For(self, node):
+        node = self._visit_body_orelse(ast.For, node)
+        return self._can_blank({'orelse'}, node)
+
+    def visit_While(self, node):
+        node = self._visit_body_orelse(ast.While, node)
+        return self._can_blank({'orelse'}, node)
+
+    def visit_If(self, node):
+        node = self._visit_body_orelse(ast.If, node)
+        return self._can_blank({'orelse'}, node)
+
+    def visit_With(self, node):
+        return self._visit_body(ast.With, node)
+
+    def visit_Try(self, node):
+        extra_fields = frozenset(['orelse', 'finalbody'])
+        fields = extra_fields.union(['body'])
+        node = self._visit_node(ast.Try, fields, node)
+        node = self._can_blank(extra_fields, node)
+        if len(node.handlers) == 0:
+            if all(len(getattr(node, stmts)) == 0 for stmts in extra_fields):
+                return node.body
+        return node
+
+    def visit_ExceptHandler(self, node):
+        return self._visit_body(ast.ExceptHandler, node)
+
+
+safe_transforms = [
+                    CombineImports,
+                    CombineWithStatements,
+                    EliminateUnusedConstants,
+                    IntegerToPower,
+                    # Run last so other transforms can just use 'pass' without
+                    # worrying.
+                    DropPass
+                ]
 
 
 class FunctionToLambda(ast.NodeTransformer):

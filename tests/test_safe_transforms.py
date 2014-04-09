@@ -13,8 +13,15 @@ class TransformTest(unittest.TestCase):
         if expect is None:
             if result is not None:
                 self.fail('{} is not None'.format(ast.dump(result, False)))
+            else:
+                return
+        expect_dump = ast.dump(expect, False)
+        if result is None:
+            self.fail('result is None, but expect is {}'.format(expect_dump))
+        elif not isinstance(result, ast.AST):
+            self.fail('result should be an AST node, not {!r}'.format(result))
         else:
-            self.assertEqual(ast.dump(result, False), ast.dump(expect, False))
+            self.assertEqual(ast.dump(result, False), expect_dump)
 
 
 class CombineImportsTests(unittest.TestCase):
@@ -207,20 +214,6 @@ class UnusedConstantEliminationTests(TransformTest):
         expect = ast.Try([ast.Pass()],
                          [ast.ExceptHandler(None, None, [ast.Pass()])], [], [])
         self.check_transform(try_exc, expect)
-        # try/finally should be eliminated when 'finally' is empty.
-        try_finally = ast.Try([ast.Pass()], [], [],
-                              [ast.Expr(ast.Str('dead code'))])
-        self.check_transform(try_finally, None)
-        # try/else should be eliminated when 'else' is empty..
-        try_else = ast.Try([ast.Pass()], [], [ast.Expr(ast.Str('dead_code'))],
-                           [])
-        self.check_transform(try_else, None)
-        # try/except/finally where 'finally' is empty gets that clause dropped.
-        try_exc_finally = ast.Try([ast.Pass()], [exc_clause], [], [ast.Pass()])
-        self.check_transform(try_exc_finally, expect)
-        # try/except/else where 'else' is empty gets that clause dropped.
-        try_exc_else = ast.Try([ast.Pass()], [exc_clause], [ast.Pass()], [])
-        self.check_transform(try_exc_else, expect)
 
 
 class IntegerToPowerTests(TransformTest):
@@ -245,6 +238,106 @@ class IntegerToPowerTests(TransformTest):
     def test_left_alone(self):
         for num in (10**5+1, float(10**5)):
             self.check_transform(ast.Num(num), ast.Num(num))
+
+
+class DropPassTests(TransformTest):
+
+    func = ast.Expr(ast.Call(ast.Name('func', ast.Load()), [], [], None, None))
+
+    @staticmethod
+    def simple_stmt():
+        return [ast.Pass()]
+
+    @classmethod
+    def fancy_stmts(cls):
+        return [ast.Pass(), cls.func, ast.Pass()]
+
+    def setUp(self):
+        self.transform = mnfy.DropPass()
+
+    def _test_mod(self, node_type):
+        basic = node_type(self.simple_stmt())
+        self.check_transform(basic, basic)
+        fancy = node_type(self.fancy_stmts())
+        self.check_transform(fancy, node_type([self.func]))
+
+    def test_Module(self):
+        self._test_mod(ast.Module)
+
+    def test_Interactive(self):
+        self._test_mod(ast.Interactive)
+
+    def test_Suite(self):
+        self._test_mod(ast.Suite)
+
+    def test_FunctionDef(self):
+        basic = ast.FunctionDef(None, None, self.simple_stmt(), [], None)
+        self.check_transform(basic, basic)
+        fancy = ast.FunctionDef(None, None, self.fancy_stmts(), [], None)
+        want = ast.FunctionDef(None, None, [self.func], [], None)
+        self.check_transform(fancy, want)
+
+    def test_ClassDef(self):
+        basic = ast.ClassDef(None, [], [], None, None, self.simple_stmt(), [])
+        self.check_transform(basic, basic)
+        fancy = ast.ClassDef(None, [], [], None, None, self.fancy_stmts(), [])
+        want = ast.ClassDef(None, [], [], None, None, [self.func], [])
+        self.check_transform(fancy, want)
+
+    def test_For(self):
+        got = ast.For(None, None, self.simple_stmt(), self.simple_stmt())
+        want = ast.For(None, None, self.simple_stmt(), [])
+        self.check_transform(got, want)
+        got = ast.For(None, None, self.fancy_stmts(), self.fancy_stmts())
+        want = ast.For(None, None, [self.func], [self.func])
+        self.check_transform(got, want)
+
+    def test_While(self):
+        got = ast.While(None, self.simple_stmt(), self.simple_stmt())
+        want = ast.While(None, self.simple_stmt(), [])
+        self.check_transform(got, want)
+        got = ast.While(None, self.fancy_stmts(), self.fancy_stmts())
+        want = ast.While(None, [self.func], [self.func])
+        self.check_transform(got, want)
+
+    def test_If(self):
+        got = ast.If(None, self.simple_stmt(), self.simple_stmt())
+        want = ast.If(None, self.simple_stmt(), [])
+        self.check_transform(got, want)
+        got = ast.If(None, self.fancy_stmts(), self.fancy_stmts())
+        want = ast.If(None, [self.func], [self.func])
+        self.check_transform(got, want)
+
+    def test_With(self):
+        got = ast.With([], self.simple_stmt())
+        self.check_transform(got, got)
+        got = ast.With([], self.fancy_stmts())
+        want = ast.With([], [self.func])
+        self.check_transform(got, want)
+
+    def test_Try(self):
+        except_ = ast.ExceptHandler(None, None, self.simple_stmt())
+        # Always keep try/except.
+        got = ast.Try([self.func], [except_], [], [])
+        want = got
+        self.check_transform(got, want)
+        # try/except/finally where 'finally' is simple -> try/except
+        got = ast.Try([self.func], [except_], [], self.simple_stmt())
+        self.check_transform(got, want)
+        # try/except/else where 'else' is simple -> try/except
+        got = ast.Try([self.func], [except_], self.simple_stmt(), [])
+        self.check_transform(got, want)
+        # try/finally where 'finally' is simple -> unwrap 'try'
+        got = ast.Module([ast.Try([self.func], [], [], self.simple_stmt())])
+        want = ast.Module([self.func])
+        self.check_transform(got, want)
+
+    def test_ExceptHandler(self):
+        got = ast.ExceptHandler(None, None, self.simple_stmt())
+        self.check_transform(got, got)
+        got = ast.ExceptHandler(None, None, self.fancy_stmts())
+        want = ast.ExceptHandler(None, None, [self.func])
+        self.check_transform(got, want)
 
 
 if __name__ == '__main__':
