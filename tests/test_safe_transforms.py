@@ -12,7 +12,7 @@ class TransformTest(unittest.TestCase):
         result = self.transform.visit(input_)
         if expect is None:
             if result is not None:
-                self.fail('{} is not None'.formatast.dump(result, False))
+                self.fail('{} is not None'.format(ast.dump(result, False)))
         else:
             self.assertEqual(ast.dump(result, False), ast.dump(expect, False))
 
