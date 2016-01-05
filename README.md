@@ -1,3 +1,5 @@
+[this project is no longer maintained]
+
 mnfy
 ====
 
