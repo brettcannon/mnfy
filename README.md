@@ -1,9 +1,9 @@
-[this project is no longer maintained]
-
 mnfy
 ====
 
 Minify Python code
+
+[![No Maintenance Intended](http://unmaintained.tech/badge.svg)](http://unmaintained.tech/)
 
 [Docs at Read the Docs](http://mnfy.rtfd.org)
 
